@@ -18,19 +18,43 @@ jobs:
       with:
         ssh-private-key: ${{ secrets.VM_SSH_KEY }}
 
-    - name: Deploy to VM
+    - name: Deploy to VM with zero downtime
       run: |
         ssh -o StrictHostKeyChecking=no ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} << 'EOF'
           set -e
-          sudo rm -rf /var/www/fastapi-hello-api/*
+          
+          # Create/Update deployment directory
           mkdir -p /var/www/fastapi-hello-api/
         EOF
 
+        # Copy updated code to the VM
         scp -r . ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}:/var/www/fastapi-hello-api/
 
+        # SSH into VM and deploy without downtime
         ssh ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} << 'EOF'
           cd /var/www/fastapi-hello-api
-          docker stop hello-api || true && docker rm hello-api || true
-          docker build -t hello-api .
-          docker run -d -p 80:80 --name hello-api hello-api
+
+          # Build new image
+          docker build -t hello-api-temp .
+
+          # Run new container temporarily on port 8080
+          docker run -d --name hello-api-temp -p 8080:80 hello-api-temp
+
+          # Wait until the new container is healthy
+          until curl -s http://localhost:8080/sayHello | grep -q "Hello User"; do
+            echo "Waiting for new container to become healthy..."
+            sleep 2
+          done
+
+          # Stop old container only after new one is ready
+          docker stop hello-api || true
+          docker rm hello-api || true
+
+          # Run new container on correct port with correct name
+          docker run -d --name hello-api -p 80:80 hello-api-temp
+
+          # Cleanup temp container and image
+          docker stop hello-api-temp || true
+          docker rm hello-api-temp || true
+          docker image rm hello-api-temp || true
         EOF
