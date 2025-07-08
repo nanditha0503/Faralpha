@@ -1,55 +1,29 @@
-name: Deploy FastAPI
+name: Send Email on Pull Request
 
 on:
-  push:
-    branches:
-      - master
+  pull_request:
+    types: [opened, synchronize, reopened]
 
 jobs:
-  deploy:
+  email_notification:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
-
-    - name: Set up SSH
-      uses: webfactory/ssh-agent@v0.9.0
-      with:
-        ssh-private-key: ${{ secrets.VM_SSH_KEY }}
-
-    - name: Deploy to VM (zero downtime)
-      run: |
-        ssh -o StrictHostKeyChecking=no ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} << 'EOF'
-          set -e
-          
-          # Prepare deployment directory
-          mkdir -p /var/www/fastapi-hello-api/
-        EOF
-
-        # Copy code to the VM
-        scp -r . ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}:/var/www/fastapi-hello-api/
-
-        ssh ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} << 'EOF'
-          cd /var/www/fastapi-hello-api
-
-          # Build new image with unique tag
-          NEW_TAG=hello-api-\$(date +%s)
-          docker build -t \$NEW_TAG .
-
-          # Run new container on a different port (e.g., 8080)
-          docker run -d --name \$NEW_TAG -p 8080:80 \$NEW_TAG
-
-          # Wait until /sayHello responds correctly
-          until curl -s http://localhost:8080/sayHello | grep -q "Hello User"; do
-            echo "Waiting for new container to be ready..."
-            sleep 2
-          done
-
-          # Swap port: re-map new container to port 80
-          docker run -d --name hello-api-new -p 80:80 \$NEW_TAG
-
-          # Optional: Remove the old hello-api container after new one is up
-          docker rm -f hello-api || true
-          docker rename hello-api-new hello-api || true
-        EOF
+      - name: Send Email
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: "🔔 PR: ${{ github.event.pull_request.title }}"
+          to: ${{ secrets.MAIL_RECEIVER }}
+          from: GitHub Notifier <${{ secrets.MAIL_USERNAME }}>
+          content_type: text/html
+          body: |
+            <h2>📢 New Pull Request Alert</h2>
+            <p><strong>Title:</strong> ${{ github.event.pull_request.title }}</p>
+            <p><strong>Author:</strong> ${{ github.event.pull_request.user.login }}</p>
+            <p><strong>Branch:</strong> ${{ github.event.pull_request.head.ref }}</p>
+            <p><strong>Repository:</strong> ${{ github.repository }}</p>
+            <p><a href="${{ github.event.pull_request.html_url }}">View Pull Request</a></p>
