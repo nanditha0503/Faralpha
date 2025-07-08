@@ -5,4 +5,4 @@ app = FastAPI()
 
 @app.get("/sayHello")
 async def say_hello():
-    return JSONResponse(content={"message": "Hello User"})
+    return JSONResponse(content={"message": "Hello Developer 👋"})
